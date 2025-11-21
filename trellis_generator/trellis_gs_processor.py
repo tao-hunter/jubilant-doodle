@@ -106,7 +106,7 @@ class GaussianProcessor:
         self.gaussians = outputs["gaussian"][0]
 
         T = np.array([0, 0, 0])
-        R = self.gaussians.rotate_by_euler_angles(-90.0, 0.0, 0.0)
+        R = self.gaussians.rotate_by_euler_angles(90.0, 0.0, 0.0)
         self.gaussians.transform_data(T, R)
 
         buffer = BytesIO()
