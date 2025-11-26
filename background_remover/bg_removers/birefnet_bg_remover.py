@@ -8,7 +8,7 @@ from background_remover.bg_removers.birefnet_model.birefnet import BiRefNet
 
 
 class BiRefNetBGRemover(BaseBGRemover):
-    def __init__(self, device, enable_optimize: bool = False):
+    def __init__(self, device):
         super().__init__()
         self._bg_remover: BiRefNet | None = None
         self._device = device
@@ -17,16 +17,12 @@ class BiRefNetBGRemover(BaseBGRemover):
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ])
-        self._enable_optimize = enable_optimize
 
     def load_model(self) -> None:
         self._bg_remover = BiRefNet.from_pretrained('ZhengPeng7/BiRefNet_dynamic')
         self._bg_remover.to(self._device)
         self._bg_remover.eval()
         self._bg_remover.half()
-
-        if self._enable_optimize:
-            self.optimize()
 
     def unload_model(self) -> None:
         del self._bg_remover
@@ -46,8 +42,4 @@ class BiRefNetBGRemover(BaseBGRemover):
         mask = pred_pil.resize(result_image.size)
         result_image.putalpha(mask)
 
-        # filtered_image = self.filter_semi_transparent_pixels(result_image)
-        # valid = self.is_image_valid(result_image)
-        valid = True
-
-        return result_image, valid
+        return result_image

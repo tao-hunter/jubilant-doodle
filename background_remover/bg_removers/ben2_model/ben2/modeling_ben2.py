@@ -8,25 +8,11 @@ import numpy as np
 from timm.layers import DropPath, to_2tuple, trunc_normal_
 from PIL import Image, ImageOps
 from torchvision import transforms
-import random
 import cv2
 import os
 import subprocess
 import tempfile
 from huggingface_hub import PyTorchModelHubMixin
-
-
-def set_random_seed(seed):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-
-
-set_random_seed(9)
 
 
 torch.set_float32_matmul_precision("highest")
@@ -1152,7 +1138,6 @@ class BEN_Base(
         del model_path
 
     def inference(self, image, refine_foreground=False):
-        set_random_seed(9)
         # image = ImageOps.exif_transpose(image)
         if isinstance(image, Image.Image):
             image, h, w, original_image = rgb_loader_refiner(image)

@@ -1,5 +1,4 @@
 import gc
-import os
 import random
 from io import BytesIO
 from PIL import Image
@@ -15,19 +14,7 @@ from background_remover.ray_bg_remover import RayBGRemoverProcessor
 from background_remover.bg_removers.ben2_bg_remover import Ben2BGRemover
 from background_remover.bg_removers.birefnet_bg_remover import BiRefNetBGRemover
 from background_remover.image_selector import ImageSelector
-
-
-def secure_randint(low: int, high: int) -> int:
-    """Return a random integer in [low, high] using os.urandom."""
-    range_size = high - low + 1
-    num_bytes = 4
-    max_int = 2**(8 * num_bytes) - 1
-
-    while True:
-        rand_bytes = os.urandom(num_bytes)
-        rand_int = int.from_bytes(rand_bytes, 'big')
-        if rand_int <= max_int - (max_int % range_size):
-            return low + (rand_int % range_size)
+from background_remover.utils.rand_utils import secure_randint, set_random_seed
 
 
 class GaussianProcessor:
@@ -91,14 +78,14 @@ class GaussianProcessor:
             for idx in indices:
                 yield idx
 
-    def _remove_background(self, image: Image.Image) -> Image.Image:
+    def _remove_background(self, image: Image.Image, seed: int) -> Image.Image:
         """ Function for removing background from the image. """
 
         futurs = [worker.run.remote(image) for worker in self._bg_removers_workers]
         results = ray.get(futurs)
-        image1 = results[0][0]
-        image2 = results[1][0]
-        output_image = self._vlm_image_selector.select_with_image_selector(image1, image2, image)
+        image1 = results[0]
+        image2 = results[1]
+        output_image = self._vlm_image_selector.select_with_image_selector(image1, image2, image, seed)
         return output_image
 
     def _generate_3d_object(self, image_no_bg: Image.Image, seed: int) -> BytesIO:
@@ -106,12 +93,12 @@ class GaussianProcessor:
 
         if seed < 0:
             set_seed = secure_randint(0, 10000)
+            set_random_seed(set_seed)
         else:
-            set_seed = seed
+            set_random_seed(seed)
 
         outputs = self._image_to_3d_pipeline.run(
             image_no_bg,
-            seed=set_seed
         )
         self.gaussians = outputs["gaussian"][0]
 
@@ -130,7 +117,7 @@ class GaussianProcessor:
 
         has_alpha = image.mode in ("LA", "RGBA", "PA")
         if not has_alpha:
-            output_image = self._remove_background(image)
+            output_image = self._remove_background(image, seed)
         else:
             output_image = image
         buffer = self._generate_3d_object(output_image, seed)

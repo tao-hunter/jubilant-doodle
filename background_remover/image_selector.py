@@ -20,7 +20,12 @@ class ImageSelector:
             "vlm_image_selector_config.yml"
         )
         vlm_settings = load_vlm_image_selector_settings_from_yaml(config_path)
-        self._vlm_image_selector = VLMImageSelector(vlm_settings, image_number_in_use, image_shape, kv_cache_dtype)
+        self._vlm_image_selector = VLMImageSelector(
+            vlm_settings=vlm_settings,
+            image_number_in_use=image_number_in_use,
+            image_shape=image_shape,
+            kv_cache_dtype=kv_cache_dtype
+        )
         os.environ["VLLM_ATTENTION_BACKEND"] = flash_attn_backend
 
     def load_model(self, custom_mem_util: float | None = None) -> None:
@@ -30,12 +35,15 @@ class ImageSelector:
         self._vlm_image_selector.unload_model()
 
     def select_with_image_selector(
-            self, image1: Image.Image, image2: Image.Image, reference_image: Image.Image
+            self, image1: Image.Image, image2: Image.Image, reference_image: Image.Image, seed: int
     ) -> Image.Image:
         """
         Function that process three input images (two results from BG removers and one reference generated image) and
         select one result using image selector.
         """
+
+        self._vlm_image_selector.create_sampling_params(seed)
+
         image_list = [image1, image2]
 
         image1_resized = resize_image(image_list[0], self._image_shape[0], self._image_shape[1])

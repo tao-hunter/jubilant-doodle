@@ -179,7 +179,7 @@ class Config():
         self.device = [0, 'cpu'][0]     # .to(0) == .to('cuda:0')
 
         self.batch_size_valid = 1
-        self.rand_seed = 7
+        # self.rand_seed = 7
         run_sh_file = [f for f in os.listdir('.') if 'train.sh' == f] + [os.path.join('..', f) for f in os.listdir('..') if 'train.sh' == f]
         if run_sh_file:
             with open(run_sh_file[0], 'r') as f:

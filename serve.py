@@ -83,11 +83,11 @@ def clean_vram() -> None:
     torch.cuda.empty_cache()
 
 
-def generation_block(prompt_image: Image.Image) -> BytesIO:
+def generation_block(prompt_image: Image.Image, seed: int = -1) -> BytesIO:
     """ Function for 3D data generation using provided image"""
 
     t_start = time()
-    buffer, _ = app.state.trellis_generator.get_model_from_image_as_ply_obj(image=prompt_image, seed=-1)
+    buffer, _ = gaussian_processor.get_model_from_image_as_ply_obj(image=prompt_image, seed=seed)
 
     t_get_model = time()
     logger.debug(f"Model Generation took: {(t_get_model - t_start)} secs.")
@@ -101,7 +101,7 @@ def generation_block(prompt_image: Image.Image) -> BytesIO:
 
 
 @app.post("/generate")
-async def generate_model(prompt_image_file: UploadFile = File(...)) -> Response:
+async def generate_model(prompt_image_file: UploadFile = File(...), seed: int = Form(-1)) -> Response:
     """ Generates a 3D model as a PLY buffer """
 
     logger.info("Task received. Prompt-Image")
@@ -110,7 +110,7 @@ async def generate_model(prompt_image_file: UploadFile = File(...)) -> Response:
     prompt_image = Image.open(BytesIO(contents))
 
     loop = asyncio.get_running_loop()
-    buffer = await loop.run_in_executor(executor, generation_block, prompt_image)
+    buffer = await loop.run_in_executor(executor, generation_block, prompt_image, seed)
     logger.info(f"Task completed.")
 
     return StreamingResponse(buffer, media_type="application/octet-stream")

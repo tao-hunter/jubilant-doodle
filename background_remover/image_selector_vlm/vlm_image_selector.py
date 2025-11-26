@@ -11,6 +11,7 @@ from vllm.sampling_params import GuidedDecodingParams
 from vllm.distributed.parallel_state import destroy_model_parallel
 from background_remover.config import VLMSettings
 from background_remover.image_selector_vlm.vram_memory_estimator import VRAMUsageEstimator
+from background_remover.utils.rand_utils import secure_randint
 
 
 class VLMImageSelector:
@@ -23,6 +24,7 @@ class VLMImageSelector:
     ) -> None:
         self._model: LLM | None = None
         self.settings: VLMSettings = vlm_settings
+        self._seed = -1
 
         self._sampling_parameters: SamplingParams | None = None
         self._stop_tokens = ["<|endoftext|>", "<|im_start|>", "<|im_end|>"]
@@ -86,7 +88,6 @@ class VLMImageSelector:
         )
 
         self._stop_token_ids = [self._tokenizer.convert_tokens_to_ids(i) for i in self._stop_tokens]
-        self._sampling_parameters = self._create_sampling_params(self._guided_decoding_params_json)
 
     def unload_model(self) -> None:
         """ Function for unloading the model """
@@ -99,18 +100,24 @@ class VLMImageSelector:
         torch.cuda.empty_cache()
         self._model = None
 
-    def _create_sampling_params(self, guided_decoding_params_json: GuidedDecodingParams) -> SamplingParams:
+    def create_sampling_params(self, seed: int) -> None:
         """ Function for creating sampling parameters for the vLLM backend """
+
+        if seed < 0:
+            seed = secure_randint(0, 10000)
+        else:
+            seed = seed
+
         sampling_params = SamplingParams(
             n=1,
             temperature=self.settings.vlm_model.temperature,
             max_tokens=self.settings.vlm_model.max_tokens,
             top_p=self.settings.vlm_model.top_p,
             stop_token_ids=self._stop_token_ids,
-            seed=self.settings.vlm_model.seed,
-            guided_decoding=guided_decoding_params_json
+            seed=seed,
+            guided_decoding=self._guided_decoding_params_json
         )
-        return sampling_params
+        self._sampling_parameters = sampling_params
 
     def create_chat_template(self, images_num: int, instruction_prompt: str) -> str:
         """ Function for creating chat template for the model that will be used. """

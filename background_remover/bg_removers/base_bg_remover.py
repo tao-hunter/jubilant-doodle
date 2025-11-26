@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from PIL import Image
 
 import numpy as np
+from background_remover.utils.rand_utils import set_random_seed
 
 
 class BaseBGRemover(ABC):
@@ -19,6 +20,10 @@ class BaseBGRemover(ABC):
     @abstractmethod
     def remove_bg(self, image: Image) -> tuple[Image, bool]:
         pass
+
+    @staticmethod
+    def set_seed(seed: int):
+        set_random_seed(seed)
 
     def is_image_valid(self, image: Image) -> bool:
         """ Function that checks if the image after background removal is empty or barely filled in with image data. """
