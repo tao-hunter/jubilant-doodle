@@ -67,14 +67,14 @@ pip install flashinfer-python==0.5.2 flashinfer-cubin==0.5.2 --no-build-isolatio
 # Store the path of the Conda interpreter
 CONDA_INTERPRETER_PATH=$(which python)
 
-# Generate the validation.config.js file for PM2 with specified configurations
+# Generate the generation.config.js file for PM2 with specified configurations
 cat <<EOF > generation.config.js
 module.exports = {
   apps : [{
     name: 'generation',
     script: 'serve.py',
     interpreter: '${CONDA_INTERPRETER_PATH}',
-    args: '--port 8094'
+    args: '--port 10006'
   }]
 };
 EOF

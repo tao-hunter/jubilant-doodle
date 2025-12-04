@@ -42,5 +42,5 @@ pm2 start generation.config.js
 pm2 logs
 
 # send prompt image
-curl -X POST "http://0.0.0.0:8094/generate" -F "prompt_image_file=@/path/to/your/image.png" > model.ply
+curl -X POST "http://0.0.0.0:10006/generate" -F "prompt_image_file=@/path/to/your/image.png" > model.ply
 ```
