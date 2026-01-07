@@ -129,11 +129,25 @@ class GaussianProcessor:
     def _remove_background(self, image: Image.Image, seed: int) -> Image.Image:
         """ Function for removing background from the image. """
 
-        futurs = [worker.run.remote(image) for worker in self._bg_removers_workers]
-        results = ray.get(futurs)
+        if not self._bg_removers_workers:
+            return image
+
+        # Running these in parallel can spike peak VRAM (multiple models executing at once).
+        # Default to sequential for stability; can opt-in to parallel via BG_REMOVER_PARALLEL=1.
+        run_parallel = os.environ.get("BG_REMOVER_PARALLEL", "0") == "1"
+
+        if run_parallel:
+            futures = [worker.run.remote(image) for worker in self._bg_removers_workers]
+            results = ray.get(futures)
+        else:
+            results = []
+            for worker in self._bg_removers_workers:
+                results.append(ray.get(worker.run.remote(image)))
+
         image1 = results[0]
         if len(results) < 2 or not getattr(self, "_bg_selector_enabled", True):
             return image1
+
         image2 = results[1]
         return self._vlm_image_selector.select_with_image_selector(image1, image2, image, seed)
 

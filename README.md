@@ -60,5 +60,6 @@ Running multiple background-removal models + the VLM selector can use a lot of V
 - `BG_REMOVER_MODE=ben2` (use one remover instead of both)
 - `BG_SELECTOR_ENABLE=0` (disable the VLM selector)
 - `BG_REMOVER_DEVICE=cpu` (run background removal on CPU; slower but stable)
+- `BG_REMOVER_PARALLEL=0` (default) runs BG models one-by-one; set `BG_REMOVER_PARALLEL=1` to run them in parallel (faster, higher peak VRAM)
 
 Note: Qwen image edit requires a `diffusers` version that includes `QwenImageEditPlusPipeline` (the provided Dockerfile installs diffusers from git).
