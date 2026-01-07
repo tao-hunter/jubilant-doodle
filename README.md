@@ -44,3 +44,11 @@ pm2 logs
 # send prompt image
 curl -X POST "http://0.0.0.0:10006/generate" -F "prompt_image_file=@/path/to/your/image.png" > model.ply
 ```
+
+### Qwen image edit (hard-coded, before background removal)
+
+This miner applies a fixed Qwen image-edit step **automatically** before background removal, using a hard-coded prompt tuned for 3D-friendly inputs.
+
+To change the prompt/params, edit `GaussianProcessor.QWEN_EDIT_PROMPT` (and related constants) in `trellis_generator/trellis_gs_processor.py`.
+
+Note: Qwen image edit requires a `diffusers` version that includes `QwenImageEditPlusPipeline` (the provided Dockerfile installs diffusers from git).

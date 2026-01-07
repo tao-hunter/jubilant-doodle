@@ -1,12 +1,6 @@
 # Trellis based generator
 FROM pytorch/pytorch:2.7.1-cuda12.8-cudnn9-runtime
 
-ARG GITHUB_USER
-ENV GITHUB_USER=${GITHUB_USER}
-
-ARG GITHUB_TOKEN
-ENV GITHUB_TOKEN=${GITHUB_TOKEN}
-
 ENV DEBIAN_FRONTEND=noninteractive
 
 LABEL name="trellis-gen" maintainer="404gen"
@@ -65,6 +59,7 @@ RUN pip install packaging
 RUN pip install flash-attn==2.8.0.post2 --no-build-isolation --no-cache-dir
 RUN pip install flashinfer-python==0.5.2 flashinfer-cubin==0.5.2 --no-build-isolation --no-cache-dir
 RUN pip install -r requirements.txt
+RUN pip install git+https://github.com/huggingface/diffusers
 
 # Copy source code after dependencies
 COPY . /app
