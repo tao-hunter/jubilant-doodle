@@ -52,12 +52,31 @@ class GaussianProcessor:
         self._image_to_3d_pipeline = TrellisImageTo3DPipeline.from_pretrained(model_name)
         self._image_to_3d_pipeline.to(self._device)
 
-        self._bg_removers_workers: list[RayBGRemoverProcessor] = [
-            RayBGRemoverProcessor.remote(Ben2BGRemover),
-            RayBGRemoverProcessor.remote(BiRefNetBGRemover),
-        ]
+        # BG removal can be VRAM-heavy. Configure via env:
+        # - BG_REMOVER_MODE=ben2|birefnet|both (default: both)
+        # - BG_REMOVER_DEVICE=cuda|cpu (default: cuda)
+        # - BG_SELECTOR_ENABLE=0 to disable VLM selector (default: enabled)
+        bg_mode = os.environ.get("BG_REMOVER_MODE", "both").lower()
+        bg_device = os.environ.get("BG_REMOVER_DEVICE", "cuda").lower()
+        use_gpu = (bg_device != "cpu") and torch.cuda.is_available()
+
+        worker_classes: list[type] = []
+        if bg_mode in ("ben2", "both"):
+            worker_classes.append(Ben2BGRemover)
+        if bg_mode in ("birefnet", "both"):
+            worker_classes.append(BiRefNetBGRemover)
+
+        self._bg_removers_workers = []
+        for cls in worker_classes:
+            if use_gpu:
+                self._bg_removers_workers.append(RayBGRemoverProcessor.remote(cls))
+            else:
+                self._bg_removers_workers.append(RayBGRemoverProcessor.options(num_gpus=0).remote(cls))
         torch.cuda.empty_cache()
-        self._vlm_image_selector.load_model()
+
+        self._bg_selector_enabled = os.environ.get("BG_SELECTOR_ENABLE", "1") == "1"
+        if self._bg_selector_enabled and len(self._bg_removers_workers) >= 2:
+            self._vlm_image_selector.load_model()
 
         # Preload Qwen image-edit so first request doesn't pay cold-start latency.
         # Disable via env if needed: QWEN_EDIT_PRELOAD=0
@@ -113,10 +132,10 @@ class GaussianProcessor:
         futurs = [worker.run.remote(image) for worker in self._bg_removers_workers]
         results = ray.get(futurs)
         image1 = results[0]
+        if len(results) < 2 or not getattr(self, "_bg_selector_enabled", True):
+            return image1
         image2 = results[1]
-        output_image = self._vlm_image_selector.select_with_image_selector(image1, image2, image, seed)
-        # output_image = image1
-        return output_image
+        return self._vlm_image_selector.select_with_image_selector(image1, image2, image, seed)
 
     def _edit_image_for_3d_style(
         self,

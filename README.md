@@ -54,4 +54,11 @@ To change the prompt/params, edit `GaussianProcessor.QWEN_EDIT_PROMPT` (and rela
 This setup uses the **Lightning LoRA** by default (4 steps / cfg=1.0). You can override the LoRA weights location via:
 - `QWEN_EDIT_LORA_PATH` (local path or `repo_id/filename` on Hugging Face)
 
+### Background removal memory tips (avoid CUDA OOM)
+
+Running multiple background-removal models + the VLM selector can use a lot of VRAM. You can reduce memory by setting:
+- `BG_REMOVER_MODE=ben2` (use one remover instead of both)
+- `BG_SELECTOR_ENABLE=0` (disable the VLM selector)
+- `BG_REMOVER_DEVICE=cpu` (run background removal on CPU; slower but stable)
+
 Note: Qwen image edit requires a `diffusers` version that includes `QwenImageEditPlusPipeline` (the provided Dockerfile installs diffusers from git).
