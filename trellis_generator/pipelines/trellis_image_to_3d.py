@@ -80,10 +80,18 @@ class TrellisImageTo3DPipeline(Pipeline):
         """
         Preprocess the input image.
         """
+        # Trellis prefers RGBA with a meaningful alpha mask. If alpha is missing/empty,
+        # fall back to a simple resize to avoid crashing on edge cases.
+        if input.mode != "RGBA":
+            input = input.convert("RGBA")
 
         output_np = np.array(input)
         alpha = output_np[:, :, 3]
         bbox = np.argwhere(alpha > 0.8 * 255)
+        if bbox.size == 0:
+            fallback = input.convert("RGB").resize((518, 518), Image.Resampling.LANCZOS)
+            return fallback
+
         bbox = np.min(bbox[:, 1]), np.min(bbox[:, 0]), np.max(bbox[:, 1]), np.max(bbox[:, 0])
         center = (bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2
         size = max(bbox[2] - bbox[0], bbox[3] - bbox[1])

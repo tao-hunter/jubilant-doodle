@@ -53,8 +53,8 @@ class GaussianProcessor:
         self._image_to_3d_pipeline.to(self._device)
 
         self._bg_removers_workers: list[RayBGRemoverProcessor] = [
-            RayBGRemoverProcessor.remote(Ben2BGRemover),
-            # RayBGRemoverProcessor.remote(BiRefNetBGRemover),
+            # RayBGRemoverProcessor.remote(Ben2BGRemover),
+            RayBGRemoverProcessor.remote(BiRefNetBGRemover),
         ]
         torch.cuda.empty_cache()
         # self._vlm_image_selector.load_model()
@@ -89,8 +89,9 @@ class GaussianProcessor:
     def warmup_generator(self):
         """ Function for warming up the generator. """
 
-        dummy = Image.new("RGB", (64, 64), color=(128, 128, 128))
         # Warmup should not load extra models (like Qwen edit).
+        # Also: Trellis preprocess expects a non-empty alpha mask; use a safe RGBA dummy.
+        dummy = Image.new("RGBA", (64, 64), color=(128, 128, 128, 255))
         self.get_model_from_image_as_ply_obj(image=dummy, seed=0, apply_qwen_edit=False)
 
     @staticmethod
