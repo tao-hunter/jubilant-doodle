@@ -31,7 +31,7 @@ class GaussianProcessor:
     QWEN_EDIT_SEED: int = 0
     QWEN_EDIT_TRUE_CFG_SCALE: float = 1.0
     QWEN_EDIT_NEGATIVE_PROMPT: str = " "
-    QWEN_EDIT_NUM_INFERENCE_STEPS: int = 8
+    QWEN_EDIT_NUM_INFERENCE_STEPS: int = 4
     QWEN_EDIT_GUIDANCE_SCALE: float = 1.0
     QWEN_EDIT_NUM_IMAGES_PER_PROMPT: int = 1
 

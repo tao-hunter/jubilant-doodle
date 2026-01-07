@@ -1,4 +1,5 @@
 import os
+import math
 from dataclasses import dataclass
 
 import torch
@@ -9,11 +10,14 @@ from loguru import logger
 @dataclass(frozen=True)
 class QwenImageEditConfig:
     model_id: str = "Qwen/Qwen-Image-Edit-2511"
-    true_cfg_scale: float = 4.0
+    # Lightning LoRA defaults: 4 steps, cfg=1.0
+    true_cfg_scale: float = 1.0
     negative_prompt: str = " "
-    num_inference_steps: int = 40
+    num_inference_steps: int = 4
     guidance_scale: float = 1.0
     num_images_per_prompt: int = 1
+    # Lightning LoRA weights (can be a local path, or "repo_id/filename" on HF)
+    lora_path: str | None = "lightx2v/Qwen-Image-Edit-2511-Lightning/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-fp32.safetensors"
     cpu_offload: bool = False
     unload_after_call: bool = False
 
@@ -53,11 +57,41 @@ class QwenImageEditor:
             model_id=os.environ.get("QWEN_EDIT_MODEL_ID", "Qwen/Qwen-Image-Edit-2511"),
             true_cfg_scale=float(os.environ.get("QWEN_EDIT_TRUE_CFG_SCALE", "1.0")),
             negative_prompt=os.environ.get("QWEN_EDIT_NEGATIVE_PROMPT", " "),
-            num_inference_steps=int(os.environ.get("QWEN_EDIT_STEPS", "8")),
+            num_inference_steps=int(os.environ.get("QWEN_EDIT_STEPS", "4")),
             guidance_scale=float(os.environ.get("QWEN_EDIT_GUIDANCE_SCALE", "1.0")),
             num_images_per_prompt=int(os.environ.get("QWEN_EDIT_NUM_IMAGES", "1")),
+            lora_path=os.environ.get(
+                "QWEN_EDIT_LORA_PATH",
+                "lightx2v/Qwen-Image-Edit-2511-Lightning/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-fp32.safetensors",
+            ),
             cpu_offload=os.environ.get("QWEN_EDIT_CPU_OFFLOAD", "0") == "1",
             unload_after_call=os.environ.get("QWEN_EDIT_UNLOAD_AFTER", "0") == "1",
+        )
+
+    @staticmethod
+    def _resolve_lora_path(lora_path: str) -> str:
+        """
+        Supports:
+        - local file path
+        - "repo_id/filename" on Hugging Face Hub
+        """
+        if os.path.exists(lora_path):
+            return lora_path
+
+        # Try HF Hub: interpret "repo_id/filename"
+        parts = lora_path.split("/")
+        if len(parts) >= 2:
+            repo_id = "/".join(parts[:-1])
+            filename = parts[-1]
+            try:
+                from huggingface_hub import hf_hub_download  # type: ignore
+            except Exception as e:  # pragma: no cover
+                raise RuntimeError("huggingface_hub is required to download LoRA weights") from e
+
+            return hf_hub_download(repo_id=repo_id, filename=filename)
+
+        raise FileNotFoundError(
+            f"LoRA weights not found: {lora_path}. Provide a local path or 'repo_id/filename' via QWEN_EDIT_LORA_PATH."
         )
 
     def load(self) -> None:
@@ -66,7 +100,8 @@ class QwenImageEditor:
 
         # Local import so normal runs don't pay import time / deps unless used.
         try:
-            from diffusers import QwenImageEditPlusPipeline  # type: ignore
+            from diffusers import FlowMatchEulerDiscreteScheduler, QwenImageEditPlusPipeline  # type: ignore
+            from diffusers.models import QwenImageTransformer2DModel  # type: ignore
         except Exception as e:  # pragma: no cover
             raise RuntimeError(
                 "Qwen image edit pipeline is not available. "
@@ -75,7 +110,41 @@ class QwenImageEditor:
             ) from e
 
         logger.info(f"Loading Qwen image editor: {self._config.model_id} (dtype={self._dtype}, device={self._device})")
-        self._pipe = QwenImageEditPlusPipeline.from_pretrained(self._config.model_id, torch_dtype=self._dtype)
+        if self._config.lora_path:
+            lora_resolved = self._resolve_lora_path(self._config.lora_path)
+            logger.info(f"Using Qwen Lightning LoRA: {self._config.lora_path} -> {lora_resolved}")
+
+            model = QwenImageTransformer2DModel.from_pretrained(
+                self._config.model_id, subfolder="transformer", torch_dtype=self._dtype
+            )
+
+            # Matches Qwen's Lightning distillation setup (shift=3).
+            scheduler_config = {
+                "base_image_seq_len": 256,
+                "base_shift": math.log(3),
+                "invert_sigmas": False,
+                "max_image_seq_len": 8192,
+                "max_shift": math.log(3),
+                "num_train_timesteps": 1000,
+                "shift": 1.0,
+                "shift_terminal": None,
+                "stochastic_sampling": False,
+                "time_shift_type": "exponential",
+                "use_beta_sigmas": False,
+                "use_dynamic_shifting": True,
+                "use_exponential_sigmas": False,
+                "use_karras_sigmas": False,
+            }
+            scheduler = FlowMatchEulerDiscreteScheduler.from_config(scheduler_config)
+            self._pipe = QwenImageEditPlusPipeline.from_pretrained(
+                self._config.model_id,
+                transformer=model,
+                scheduler=scheduler,
+                torch_dtype=self._dtype,
+            )
+            self._pipe.load_lora_weights(lora_resolved)
+        else:
+            self._pipe = QwenImageEditPlusPipeline.from_pretrained(self._config.model_id, torch_dtype=self._dtype)
 
         if self._config.cpu_offload:
             # Reduces VRAM usage; slower but safer alongside Trellis.

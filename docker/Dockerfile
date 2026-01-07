@@ -60,6 +60,7 @@ RUN pip install flash-attn==2.8.0.post2 --no-build-isolation --no-cache-dir
 RUN pip install flashinfer-python==0.5.2 flashinfer-cubin==0.5.2 --no-build-isolation --no-cache-dir
 RUN pip install -r requirements.txt
 RUN pip install git+https://github.com/huggingface/diffusers
+RUN pip install peft==0.17.0
 
 # Copy source code after dependencies
 COPY . /app

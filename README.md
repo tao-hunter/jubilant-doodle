@@ -51,4 +51,7 @@ This miner applies a fixed Qwen image-edit step **automatically** before backgro
 
 To change the prompt/params, edit `GaussianProcessor.QWEN_EDIT_PROMPT` (and related constants) in `trellis_generator/trellis_gs_processor.py`.
 
+This setup uses the **Lightning LoRA** by default (4 steps / cfg=1.0). You can override the LoRA weights location via:
+- `QWEN_EDIT_LORA_PATH` (local path or `repo_id/filename` on Hugging Face)
+
 Note: Qwen image edit requires a `diffusers` version that includes `QwenImageEditPlusPipeline` (the provided Dockerfile installs diffusers from git).

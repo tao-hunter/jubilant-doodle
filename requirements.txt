@@ -6,6 +6,7 @@ loguru==0.7.3
 einops==0.8.1
 timm==1.0.20
 packaging==25.0
+peft==0.17.0
 
 diffusers==0.35.1
 accelerate==1.10.1
