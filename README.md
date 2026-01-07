@@ -57,9 +57,12 @@ This setup uses the **Lightning LoRA** by default (4 steps / cfg=1.0). You can o
 ### Background removal memory tips (avoid CUDA OOM)
 
 Running multiple background-removal models + the VLM selector can use a lot of VRAM. You can reduce memory by setting:
-- `BG_REMOVER_MODE=ben2` (use one remover instead of both)
-- `BG_SELECTOR_ENABLE=0` (disable the VLM selector)
 - `BG_REMOVER_DEVICE=cpu` (run background removal on CPU; slower but stable)
-- `BG_REMOVER_PARALLEL=0` (default) runs BG models one-by-one; set `BG_REMOVER_PARALLEL=1` to run them in parallel (faster, higher peak VRAM)
+
+### Multi-image Trellis input
+
+For 3D generation, the miner feeds **two images** into Trellis (when Qwen edit is enabled):
+- original image (background removed)
+- Qwen-edited image (background removed)
 
 Note: Qwen image edit requires a `diffusers` version that includes `QwenImageEditPlusPipeline` (the provided Dockerfile installs diffusers from git).

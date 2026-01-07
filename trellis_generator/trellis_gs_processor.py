@@ -12,9 +12,7 @@ from loguru import logger
 from trellis_generator.pipelines import TrellisImageTo3DPipeline
 from trellis_generator.qwen_image_editor import QwenImageEditor
 from background_remover.ray_bg_remover import RayBGRemoverProcessor
-from background_remover.bg_removers.ben2_bg_remover import Ben2BGRemover
 from background_remover.bg_removers.birefnet_bg_remover import BiRefNetBGRemover
-from background_remover.image_selector import ImageSelector
 from background_remover.utils.rand_utils import secure_randint, set_random_seed
 
 
@@ -40,7 +38,6 @@ class GaussianProcessor:
         logger.info(f"TRELLIS ATTENTION backend: {os.environ['ATTN_BACKEND']}")
 
         self._bg_removers_workers: list[RayBGRemoverProcessor] = []
-        self._vlm_image_selector = ImageSelector(3, image_shape, vllm_flash_attn_backend)
         self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self._image_to_3d_pipeline: TrellisImageTo3DPipeline | None = None
         self._qwen_editor: QwenImageEditor | None = None
@@ -52,31 +49,16 @@ class GaussianProcessor:
         self._image_to_3d_pipeline = TrellisImageTo3DPipeline.from_pretrained(model_name)
         self._image_to_3d_pipeline.to(self._device)
 
-        # BG removal can be VRAM-heavy. Configure via env:
-        # - BG_REMOVER_MODE=ben2|birefnet|both (default: both)
+        # BG removal can be VRAM-heavy. This miner uses BiRefNet only.
         # - BG_REMOVER_DEVICE=cuda|cpu (default: cuda)
-        # - BG_SELECTOR_ENABLE=0 to disable VLM selector (default: enabled)
-        bg_mode = os.environ.get("BG_REMOVER_MODE", "both").lower()
         bg_device = os.environ.get("BG_REMOVER_DEVICE", "cuda").lower()
         use_gpu = (bg_device != "cpu") and torch.cuda.is_available()
 
-        worker_classes: list[type] = []
-        if bg_mode in ("ben2", "both"):
-            worker_classes.append(Ben2BGRemover)
-        if bg_mode in ("birefnet", "both"):
-            worker_classes.append(BiRefNetBGRemover)
-
-        self._bg_removers_workers = []
-        for cls in worker_classes:
-            if use_gpu:
-                self._bg_removers_workers.append(RayBGRemoverProcessor.remote(cls))
-            else:
-                self._bg_removers_workers.append(RayBGRemoverProcessor.options(num_gpus=0).remote(cls))
+        if use_gpu:
+            self._bg_removers_workers = [RayBGRemoverProcessor.remote(BiRefNetBGRemover)]
+        else:
+            self._bg_removers_workers = [RayBGRemoverProcessor.options(num_gpus=0).remote(BiRefNetBGRemover)]
         torch.cuda.empty_cache()
-
-        self._bg_selector_enabled = os.environ.get("BG_SELECTOR_ENABLE", "1") == "1"
-        if self._bg_selector_enabled and len(self._bg_removers_workers) >= 2:
-            self._vlm_image_selector.load_model()
 
         # Preload Qwen image-edit so first request doesn't pay cold-start latency.
         # Disable via env if needed: QWEN_EDIT_PRELOAD=0
@@ -132,24 +114,8 @@ class GaussianProcessor:
         if not self._bg_removers_workers:
             return image
 
-        # Running these in parallel can spike peak VRAM (multiple models executing at once).
-        # Default to sequential for stability; can opt-in to parallel via BG_REMOVER_PARALLEL=1.
-        run_parallel = os.environ.get("BG_REMOVER_PARALLEL", "0") == "1"
-
-        if run_parallel:
-            futures = [worker.run.remote(image) for worker in self._bg_removers_workers]
-            results = ray.get(futures)
-        else:
-            results = []
-            for worker in self._bg_removers_workers:
-                results.append(ray.get(worker.run.remote(image)))
-
-        image1 = results[0]
-        if len(results) < 2 or not getattr(self, "_bg_selector_enabled", True):
-            return image1
-
-        image2 = results[1]
-        return self._vlm_image_selector.select_with_image_selector(image1, image2, image, seed)
+        # Single BG worker (BiRefNet) -> single output image; no selector.
+        return ray.get(self._bg_removers_workers[0].run.remote(image))
 
     def _edit_image_for_3d_style(
         self,
@@ -177,8 +143,8 @@ class GaussianProcessor:
             num_images_per_prompt=num_images_per_prompt,
         )
 
-    def _generate_3d_object(self, image_no_bg: Image.Image, seed: int) -> BytesIO:
-        """ Function for generating a 3D object using an input image without background. """
+    def _generate_3d_object(self, images_no_bg: list[Image.Image], seed: int) -> BytesIO:
+        """Generate a 3D object from one or more input images without background."""
 
         if seed < 0:
             set_seed = secure_randint(0, 10000)
@@ -186,9 +152,10 @@ class GaussianProcessor:
         else:
             set_random_seed(seed)
 
-        outputs = self._image_to_3d_pipeline.run(
-            image_no_bg,
-        )
+        if len(images_no_bg) == 1:
+            outputs = self._image_to_3d_pipeline.run(images_no_bg[0])
+        else:
+            outputs = self._image_to_3d_pipeline.run_multi_image(images_no_bg)
         self.gaussians = outputs["gaussian"][0]
 
         buffer = BytesIO()
@@ -204,13 +171,17 @@ class GaussianProcessor:
         *,
         apply_qwen_edit: bool = True,
     ) -> tuple[BytesIO, Image.Image]:
-        """Generate 3D model from image (Qwen edit -> background removal -> Trellis)."""
+        """Generate 3D model from image(s) (Qwen edit -> BG removal -> Trellis multi-image)."""
 
-        working_image = image
+        # 1) Remove background from the original image
+        original_has_alpha = image.mode in ("LA", "RGBA", "PA")
+        original_no_bg = image if original_has_alpha else self._remove_background(image, seed)
+
+        # 2) Optionally edit, then remove background from edited image
         if apply_qwen_edit:
             logger.info("Applying Qwen image edit (pre background-removal) ...")
-            working_image = self._edit_image_for_3d_style(
-                working_image,
+            edited = self._edit_image_for_3d_style(
+                image,
                 edit_prompt=self.QWEN_EDIT_PROMPT,
                 edit_seed=self.QWEN_EDIT_SEED,
                 true_cfg_scale=self.QWEN_EDIT_TRUE_CFG_SCALE,
@@ -219,12 +190,12 @@ class GaussianProcessor:
                 guidance_scale=self.QWEN_EDIT_GUIDANCE_SCALE,
                 num_images_per_prompt=self.QWEN_EDIT_NUM_IMAGES_PER_PROMPT,
             )
-
-        has_alpha = working_image.mode in ("LA", "RGBA", "PA")
-        if not has_alpha:
-            output_image = self._remove_background(working_image, seed)
+            edited_has_alpha = edited.mode in ("LA", "RGBA", "PA")
+            edited_no_bg = edited if edited_has_alpha else self._remove_background(edited, seed)
+            images_for_3d = [original_no_bg, edited_no_bg]
         else:
-            output_image = working_image
+            edited_no_bg = original_no_bg
+            images_for_3d = [original_no_bg]
 
-        buffer = self._generate_3d_object(output_image, seed)
-        return buffer, output_image
+        buffer = self._generate_3d_object(images_for_3d, seed)
+        return buffer, edited_no_bg
