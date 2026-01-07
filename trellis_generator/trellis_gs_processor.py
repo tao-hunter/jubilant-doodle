@@ -53,11 +53,11 @@ class GaussianProcessor:
         self._image_to_3d_pipeline.to(self._device)
 
         self._bg_removers_workers: list[RayBGRemoverProcessor] = [
-            # RayBGRemoverProcessor.remote(Ben2BGRemover),
+            RayBGRemoverProcessor.remote(Ben2BGRemover),
             RayBGRemoverProcessor.remote(BiRefNetBGRemover),
         ]
         torch.cuda.empty_cache()
-        # self._vlm_image_selector.load_model()
+        self._vlm_image_selector.load_model()
 
         # Preload Qwen image-edit so first request doesn't pay cold-start latency.
         # Disable via env if needed: QWEN_EDIT_PRELOAD=0
@@ -113,9 +113,9 @@ class GaussianProcessor:
         futurs = [worker.run.remote(image) for worker in self._bg_removers_workers]
         results = ray.get(futurs)
         image1 = results[0]
-        # image2 = results[1]
-        # output_image = self._vlm_image_selector.select_with_image_selector(image1, image2, image, seed)
-        output_image = image1
+        image2 = results[1]
+        output_image = self._vlm_image_selector.select_with_image_selector(image1, image2, image, seed)
+        # output_image = image1
         return output_image
 
     def _edit_image_for_3d_style(
