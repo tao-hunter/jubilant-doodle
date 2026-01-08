@@ -192,6 +192,10 @@ class GaussianProcessor:
             # Use deterministic edit seed even when 3D seed is random.
             edit_seed = self.QWEN_EDIT_SEED if seed < 0 else seed
 
+            # Also include the original image (background removed) in Trellis input.
+            original_has_alpha = image.mode in ("LA", "RGBA", "PA")
+            original_no_bg = image if original_has_alpha else self._remove_background(image, seed)
+
             edited_left = self._edit_image_for_3d_style(
                 image,
                 edit_prompt=self.QWEN_EDIT_PROMPT_LEFT,
@@ -231,7 +235,7 @@ class GaussianProcessor:
             image_without_background_2 = _maybe_remove_bg(edited_right)
             image_without_background_3 = _maybe_remove_bg(edited_back)
 
-            images_for_3d = [image_without_background_1, image_without_background_2, image_without_background_3]
+            images_for_3d = [original_no_bg, image_without_background_1, image_without_background_2, image_without_background_3]
             buffer = self._generate_3d_object(images_for_3d, seed)
 
             # Return one representative image (left-view) as the "processed image".
