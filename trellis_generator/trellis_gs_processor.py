@@ -20,8 +20,20 @@ class GaussianProcessor:
     """Generates 3d models and videos"""
 
     # Hard-coded Qwen edit prompt and parameters for consistent 3D-friendly inputs.
-    QWEN_EDIT_PROMPT: str = (
-        "Show this object in three-quarters view and make sure it is fully visible. "
+    QWEN_EDIT_PROMPT_LEFT: str = (
+        "Show this object in left three-quarters view and make sure it is fully visible. "
+        "Turn background neutral solid color contrasting with an object. "
+        "Delete background details. Delete watermarks. Keep object colors. "
+        "Sharpen image details"
+    )
+    QWEN_EDIT_PROMPT_RIGHT: str = (
+        "Show this object in right three-quarters view and make sure it is fully visible. "
+        "Turn background neutral solid color contrasting with an object. "
+        "Delete background details. Delete watermarks. Keep object colors. "
+        "Sharpen image details"
+    )
+    QWEN_EDIT_PROMPT_BACK: str = (
+        "Show this object in back view and make sure it is fully visible. "
         "Turn background neutral solid color contrasting with an object. "
         "Delete background details. Delete watermarks. Keep object colors. "
         "Sharpen image details"
@@ -173,29 +185,60 @@ class GaussianProcessor:
     ) -> tuple[BytesIO, Image.Image]:
         """Generate 3D model from image(s) (Qwen edit -> BG removal -> Trellis multi-image)."""
 
-        # 1) Remove background from the original image
-        original_has_alpha = image.mode in ("LA", "RGBA", "PA")
-        original_no_bg = image if original_has_alpha else self._remove_background(image, seed)
-
-        # 2) Optionally edit, then remove background from edited image
+        # Trellis "multi image" input: 3 Qwen-edited views (left/right/back), each BG-removed.
         if apply_qwen_edit:
-            logger.info("Applying Qwen image edit (pre background-removal) ...")
-            edited = self._edit_image_for_3d_style(
+            logger.info("Applying Qwen image edits (left/right/back) before background removal ...")
+
+            # Use deterministic edit seed even when 3D seed is random.
+            edit_seed = self.QWEN_EDIT_SEED if seed < 0 else seed
+
+            edited_left = self._edit_image_for_3d_style(
                 image,
-                edit_prompt=self.QWEN_EDIT_PROMPT,
-                edit_seed=self.QWEN_EDIT_SEED,
+                edit_prompt=self.QWEN_EDIT_PROMPT_LEFT,
+                edit_seed=edit_seed,
                 true_cfg_scale=self.QWEN_EDIT_TRUE_CFG_SCALE,
                 negative_prompt=self.QWEN_EDIT_NEGATIVE_PROMPT,
                 num_inference_steps=self.QWEN_EDIT_NUM_INFERENCE_STEPS,
                 guidance_scale=self.QWEN_EDIT_GUIDANCE_SCALE,
                 num_images_per_prompt=self.QWEN_EDIT_NUM_IMAGES_PER_PROMPT,
             )
-            edited_has_alpha = edited.mode in ("LA", "RGBA", "PA")
-            edited_no_bg = edited if edited_has_alpha else self._remove_background(edited, seed)
-            images_for_3d = [original_no_bg, edited_no_bg]
-        else:
-            edited_no_bg = original_no_bg
-            images_for_3d = [original_no_bg]
+            edited_right = self._edit_image_for_3d_style(
+                image,
+                edit_prompt=self.QWEN_EDIT_PROMPT_RIGHT,
+                edit_seed=edit_seed,
+                true_cfg_scale=self.QWEN_EDIT_TRUE_CFG_SCALE,
+                negative_prompt=self.QWEN_EDIT_NEGATIVE_PROMPT,
+                num_inference_steps=self.QWEN_EDIT_NUM_INFERENCE_STEPS,
+                guidance_scale=self.QWEN_EDIT_GUIDANCE_SCALE,
+                num_images_per_prompt=self.QWEN_EDIT_NUM_IMAGES_PER_PROMPT,
+            )
+            edited_back = self._edit_image_for_3d_style(
+                image,
+                edit_prompt=self.QWEN_EDIT_PROMPT_BACK,
+                edit_seed=edit_seed,
+                true_cfg_scale=self.QWEN_EDIT_TRUE_CFG_SCALE,
+                negative_prompt=self.QWEN_EDIT_NEGATIVE_PROMPT,
+                num_inference_steps=self.QWEN_EDIT_NUM_INFERENCE_STEPS,
+                guidance_scale=self.QWEN_EDIT_GUIDANCE_SCALE,
+                num_images_per_prompt=self.QWEN_EDIT_NUM_IMAGES_PER_PROMPT,
+            )
 
-        buffer = self._generate_3d_object(images_for_3d, seed)
-        return buffer, edited_no_bg
+            def _maybe_remove_bg(img: Image.Image) -> Image.Image:
+                has_alpha = img.mode in ("LA", "RGBA", "PA")
+                return img if has_alpha else self._remove_background(img, seed)
+
+            image_without_background_1 = _maybe_remove_bg(edited_left)
+            image_without_background_2 = _maybe_remove_bg(edited_right)
+            image_without_background_3 = _maybe_remove_bg(edited_back)
+
+            images_for_3d = [image_without_background_1, image_without_background_2, image_without_background_3]
+            buffer = self._generate_3d_object(images_for_3d, seed)
+
+            # Return one representative image (left-view) as the "processed image".
+            return buffer, image_without_background_1
+
+        # Fallback: single-image path (warmup / if Qwen edit disabled)
+        has_alpha = image.mode in ("LA", "RGBA", "PA")
+        image_no_bg = image if has_alpha else self._remove_background(image, seed)
+        buffer = self._generate_3d_object([image_no_bg], seed)
+        return buffer, image_no_bg

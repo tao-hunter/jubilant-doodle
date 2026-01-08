@@ -61,8 +61,9 @@ Running multiple background-removal models + the VLM selector can use a lot of V
 
 ### Multi-image Trellis input
 
-For 3D generation, the miner feeds **two images** into Trellis (when Qwen edit is enabled):
-- original image (background removed)
-- Qwen-edited image (background removed)
+For 3D generation, the miner feeds **three images** into Trellis (when Qwen edit is enabled):
+- Qwen-edited left three-quarters view (background removed)
+- Qwen-edited right three-quarters view (background removed)
+- Qwen-edited back view (background removed)
 
 Note: Qwen image edit requires a `diffusers` version that includes `QwenImageEditPlusPipeline` (the provided Dockerfile installs diffusers from git).
