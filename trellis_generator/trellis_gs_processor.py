@@ -38,6 +38,13 @@ class GaussianProcessor:
         "Preserve natural lighting and shading on the object surface (avoid flat relighting). "
         "Include all attached/secondary parts that belong to the object and keep their relative positions."
     )
+    QWEN_EDIT_PROMPT_SCENE_CLEANUP: str = (
+        "Keep the same viewpoint and composition. "
+        "Preserve the full scene/background context (street/room/etc.) and do NOT replace it with a solid color. "
+        "Remove watermarks only. "
+        "Preserve object geometry exactly (no adding/removing parts), preserve textures/materials/labels, "
+        "and keep natural lighting, shadows, and reflections."
+    )
     QWEN_EDIT_SEED: int = 0
     QWEN_EDIT_TRUE_CFG_SCALE: float = 1.0
     QWEN_EDIT_NEGATIVE_PROMPT: str = " "
@@ -184,6 +191,37 @@ class GaussianProcessor:
         apply_qwen_edit: bool = True,
     ) -> tuple[BytesIO, Image.Image]:
         """Generate 3D model from image(s) (Qwen edit -> BG removal -> Trellis multi-image)."""
+
+        scene_mode = os.environ.get("TRELLIS_SCENE_MODE", "0") == "1"
+
+        # Scene mode: keep background/context. Use a single "cleanup" edit (same view), and feed [original, edited].
+        if apply_qwen_edit and scene_mode:
+            logger.info("Scene mode enabled: preserving full context (no background removal).")
+            edit_seed = self.QWEN_EDIT_SEED if seed < 0 else seed
+
+            edited_scene = self._edit_image_for_3d_style(
+                image,
+                edit_prompt=self.QWEN_EDIT_PROMPT_SCENE_CLEANUP,
+                edit_seed=edit_seed,
+                true_cfg_scale=self.QWEN_EDIT_TRUE_CFG_SCALE,
+                negative_prompt=self.QWEN_EDIT_NEGATIVE_PROMPT,
+                num_inference_steps=self.QWEN_EDIT_NUM_INFERENCE_STEPS,
+                guidance_scale=self.QWEN_EDIT_GUIDANCE_SCALE,
+                num_images_per_prompt=self.QWEN_EDIT_NUM_IMAGES_PER_PROMPT,
+            )
+
+            images_for_3d = [image.convert("RGB"), edited_scene.convert("RGB")]
+            weights_for_3d = [0.9, 0.1]
+
+            sim_min = float(os.environ.get("TRELLIS_MULTI_SIM_MIN", "0.25"))
+            sims = self._image_to_3d_pipeline.cosine_sim_to_first(images_for_3d)
+            keep_idx = [0] + [1] if sims[1] >= sim_min else [0]
+            images_for_3d = [images_for_3d[i] for i in keep_idx]
+            weights_for_3d = [weights_for_3d[i] for i in keep_idx]
+            logger.info(f"Trellis scene multi-image keep={keep_idx} sims={['%.3f' % s for s in sims]}")
+
+            buffer = self._generate_3d_object(images_for_3d, seed, weights=weights_for_3d)
+            return buffer, edited_scene
 
         # Trellis "multi image" input: original + 2 Qwen-edited views (left/right), each BG-removed.
         if apply_qwen_edit:

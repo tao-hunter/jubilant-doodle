@@ -7,6 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from torchvision import transforms
+from PIL import ImageOps
 from .base import Pipeline
 from . import samplers
 from ..modules import sparse as sp
@@ -81,6 +82,19 @@ class TrellisImageTo3DPipeline(Pipeline):
         """
         Preprocess the input image.
         """
+        # Scene mode: keep full context; don't alpha-crop around foreground.
+        # This is useful when evaluation expects object+environment.
+        if os.environ.get("TRELLIS_SCENE_MODE", "0") == "1":
+            rgb = input.convert("RGB")
+            # Aspect-preserving pad to square.
+            return ImageOps.pad(
+                rgb,
+                (518, 518),
+                method=Image.Resampling.LANCZOS,
+                color=(0, 0, 0),
+                centering=(0.5, 0.5),
+            )
+
         # Trellis prefers RGBA with a meaningful alpha mask. If alpha is missing/empty,
         # fall back to a simple resize to avoid crashing on edge cases.
         if input.mode != "RGBA":

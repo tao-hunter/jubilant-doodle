@@ -72,3 +72,13 @@ Note: Qwen image edit requires a `diffusers` version that includes `QwenImageEdi
 
 - Trellis crops around the alpha mask; if attachments are getting cut off, increase padding:
   - `TRELLIS_ALPHA_PAD=1.5` (default is `1.35`)
+
+### Scene mode (object + environment)
+
+If you want the 3D to reflect the **object + scene context** (e.g. street/room background), set:
+- `TRELLIS_SCENE_MODE=1`
+
+In scene mode, the miner:
+- does **not** remove the background
+- runs a single Qwen “cleanup (same view)” edit that preserves lighting/shadows and scene context
+- feeds Trellis with `[original_scene, edited_scene]` (weighted toward the original)
