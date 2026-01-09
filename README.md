@@ -67,3 +67,8 @@ For 3D generation, the miner feeds **three images** into Trellis (when Qwen edit
 - Qwen-edited right three-quarters view (background removed)
 
 Note: Qwen image edit requires a `diffusers` version that includes `QwenImageEditPlusPipeline` (the provided Dockerfile installs diffusers from git).
+
+### Tips for texture/attachments fidelity
+
+- Trellis crops around the alpha mask; if attachments are getting cut off, increase padding:
+  - `TRELLIS_ALPHA_PAD=1.5` (default is `1.35`)

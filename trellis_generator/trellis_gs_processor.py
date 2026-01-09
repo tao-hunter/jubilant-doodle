@@ -24,13 +24,19 @@ class GaussianProcessor:
         "Show this object in left three-quarters view and make sure it is fully visible. "
         "Turn background neutral solid color contrasting with an object. "
         "Delete background details. Delete watermarks. Keep object colors. "
-        "Sharpen image details"
+        "Sharpen image details. "
+        "Preserve the original materials and textures (patterns, decals, labels, text). "
+        "Preserve natural lighting and shading on the object surface (avoid flat relighting). "
+        "Include all attached/secondary parts that belong to the object and keep their relative positions."
     )
     QWEN_EDIT_PROMPT_RIGHT: str = (
         "Show this object in right three-quarters view and make sure it is fully visible. "
         "Turn background neutral solid color contrasting with an object. "
         "Delete background details. Delete watermarks. Keep object colors. "
-        "Sharpen image details"
+        "Sharpen image details. "
+        "Preserve the original materials and textures (patterns, decals, labels, text). "
+        "Preserve natural lighting and shading on the object surface (avoid flat relighting). "
+        "Include all attached/secondary parts that belong to the object and keep their relative positions."
     )
     QWEN_EDIT_SEED: int = 0
     QWEN_EDIT_TRUE_CFG_SCALE: float = 1.0

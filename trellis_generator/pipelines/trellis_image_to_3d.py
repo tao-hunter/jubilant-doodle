@@ -1,6 +1,7 @@
 from PIL import Image
 from typing import *
 
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -95,9 +96,20 @@ class TrellisImageTo3DPipeline(Pipeline):
         bbox = np.min(bbox[:, 1]), np.min(bbox[:, 0]), np.max(bbox[:, 1]), np.max(bbox[:, 0])
         center = (bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2
         size = max(bbox[2] - bbox[0], bbox[3] - bbox[1])
-        size = int(size * 1.2)
+        pad = float(os.environ.get("TRELLIS_ALPHA_PAD", "1.35"))
+        size = int(size * pad)
         bbox = center[0] - size // 2, center[1] - size // 2, center[0] + size // 2, center[1] + size // 2
-        output = input.crop(bbox)  # type: ignore
+        # Clamp bbox to image bounds to avoid accidental cropping/padding artifacts.
+        w, h = input.size
+        x0 = max(0, int(bbox[0]))
+        y0 = max(0, int(bbox[1]))
+        x1 = min(w, int(bbox[2]))
+        y1 = min(h, int(bbox[3]))
+        if x1 <= x0 or y1 <= y0:
+            fallback = input.convert("RGB").resize((518, 518), Image.Resampling.LANCZOS)
+            return fallback
+
+        output = input.crop((x0, y0, x1, y1))
         output = output.resize((518, 518), Image.Resampling.LANCZOS)
         output = np.array(output).astype(np.float32) / 255
         output = output[:, :, :3] * output[:, :, 3:4]
