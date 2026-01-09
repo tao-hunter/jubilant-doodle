@@ -155,7 +155,7 @@ class GaussianProcessor:
             num_images_per_prompt=num_images_per_prompt,
         )
 
-    def _generate_3d_object(self, images_no_bg: list[Image.Image], seed: int) -> BytesIO:
+    def _generate_3d_object(self, images_no_bg: list[Image.Image], seed: int, *, weights: list[float] | None = None) -> BytesIO:
         """Generate a 3D object from one or more input images without background."""
 
         if seed < 0:
@@ -167,7 +167,7 @@ class GaussianProcessor:
         if len(images_no_bg) == 1:
             outputs = self._image_to_3d_pipeline.run(images_no_bg[0])
         else:
-            outputs = self._image_to_3d_pipeline.run_multi_image(images_no_bg)
+            outputs = self._image_to_3d_pipeline.run_multi_image(images_no_bg, weights=weights)
         self.gaussians = outputs["gaussian"][0]
 
         buffer = BytesIO()
@@ -236,7 +236,21 @@ class GaussianProcessor:
             image_without_background_3 = _maybe_remove_bg(edited_back)
 
             images_for_3d = [original_no_bg, image_without_background_1, image_without_background_2, image_without_background_3]
-            buffer = self._generate_3d_object(images_for_3d, seed)
+            weights_for_3d = [0.7, 0.1, 0.1, 0.1]
+
+            # Similarity gating: drop aux views that drift too far from the original (exact-match priority).
+            # Threshold can be tuned via env: TRELLIS_MULTI_SIM_MIN (default 0.25)
+            sim_min = float(os.environ.get("TRELLIS_MULTI_SIM_MIN", "0.25"))
+            sims = self._image_to_3d_pipeline.cosine_sim_to_first(images_for_3d)
+            keep_idx = [0] + [i for i in range(1, len(images_for_3d)) if sims[i] >= sim_min]
+
+            # Always keep at least the original image.
+            images_for_3d = [images_for_3d[i] for i in keep_idx]
+            weights_for_3d = [weights_for_3d[i] for i in keep_idx]
+
+            logger.info(f"Trellis multi-image keep={keep_idx} sims={['%.3f' % s for s in sims]}")
+
+            buffer = self._generate_3d_object(images_for_3d, seed, weights=weights_for_3d)
 
             # Return one representative image (left-view) as the "processed image".
             return buffer, image_without_background_1

@@ -5,7 +5,7 @@ import os
 from io import BytesIO
 from time import time
 from PIL import Image
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, AsyncGenerator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 
@@ -128,7 +128,19 @@ async def generate_model(
     )
     logger.info(f"Task completed.")
 
-    return StreamingResponse(buffer, media_type="application/octet-stream")
+    buffer_size = len(buffer.getvalue())
+    buffer.seek(0)
+
+    async def generate_chunks() -> AsyncGenerator[bytes, None]:
+        chunk_size = 1024 * 1024  # 1 MB
+        while chunk := buffer.read(chunk_size):
+            yield chunk
+
+    return StreamingResponse(
+        generate_chunks(),
+        media_type="application/octet-stream",
+        headers={"Content-Length": str(buffer_size)},
+    )
 
 
 @app.get("/version", response_model=str)

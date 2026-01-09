@@ -149,19 +149,44 @@ class TrellisImageTo3DPipeline(Pipeline):
             'neg_cond': neg_cond,
         }
 
-    def get_cond_multi_image(self, images: list[Image.Image]) -> dict:
+    def get_cond_multi_image(self, images: list[Image.Image], weights: list[float] | None = None) -> dict:
         """
-        Get conditioning for multiple images by aggregating (mean-pooling) the image features.
+        Get conditioning for multiple images by aggregating (optionally weighted) image features.
         This provides a single conditioning tensor compatible with the rest of the pipeline.
         """
         if not isinstance(images, list) or len(images) == 0:
             raise ValueError("images must be a non-empty list of PIL images")
 
-        cond_multi = self.encode_image(images)  # (N, ..., D)
-        # Aggregate across images to a single condition (1, ..., D)
-        cond = cond_multi.mean(dim=0, keepdim=True)
+        cond_multi = self.encode_image(images)  # (N, T, D)
+
+        if weights is None:
+            # Aggregate across images to a single condition (1, T, D)
+            cond = cond_multi.mean(dim=0, keepdim=True)
+        else:
+            if len(weights) != len(images):
+                raise ValueError("weights must have the same length as images")
+            w = torch.tensor(weights, device=cond_multi.device, dtype=cond_multi.dtype)
+            w = torch.clamp(w, min=0)
+            if torch.sum(w) == 0:
+                w = torch.ones_like(w)
+            w = w / torch.sum(w)
+            cond = torch.sum(cond_multi * w[:, None, None], dim=0, keepdim=True)
+
         neg_cond = torch.zeros_like(cond)
         return {"cond": cond, "neg_cond": neg_cond}
+
+    @torch.no_grad()
+    def cosine_sim_to_first(self, images: list[Image.Image]) -> list[float]:
+        """
+        Returns cosine similarities between each image and images[0], using DINO patchtoken mean as embedding.
+        """
+        if len(images) == 0:
+            return []
+        feats = self.encode_image(images)  # (N, T, D)
+        emb = feats.mean(dim=1)  # (N, D)
+        emb = F.normalize(emb, dim=-1)
+        sims = (emb @ emb[0:1].T).squeeze(-1)  # (N,)
+        return [float(x) for x in sims.detach().cpu().tolist()]
 
     def sample_sparse_structure(
         self,
@@ -289,6 +314,7 @@ class TrellisImageTo3DPipeline(Pipeline):
         images: list[Image.Image],
         num_samples: int = 1,
         seed: int | None = None,
+        weights: list[float] | None = None,
         sparse_structure_sampler_params: dict = {},
         slat_sampler_params: dict = {},
         formats: List[str] = ['mesh', 'gaussian'],
@@ -309,7 +335,7 @@ class TrellisImageTo3DPipeline(Pipeline):
         if preprocess_image:
             images = [self.preprocess_image(img) for img in images]
 
-        cond = self.get_cond_multi_image(images)
+        cond = self.get_cond_multi_image(images, weights=weights)
         coords = self.sample_sparse_structure(cond, num_samples, sparse_structure_sampler_params)
         slat = self.sample_slat(cond, coords, slat_sampler_params)
         return self.decode_slat(slat, formats)
