@@ -32,12 +32,6 @@ class GaussianProcessor:
         "Delete background details. Delete watermarks. Keep object colors. "
         "Sharpen image details"
     )
-    QWEN_EDIT_PROMPT_BACK: str = (
-        "Show this object in back view and make sure it is fully visible. "
-        "Turn background neutral solid color contrasting with an object. "
-        "Delete background details. Delete watermarks. Keep object colors. "
-        "Sharpen image details"
-    )
     QWEN_EDIT_SEED: int = 0
     QWEN_EDIT_TRUE_CFG_SCALE: float = 1.0
     QWEN_EDIT_NEGATIVE_PROMPT: str = " "
@@ -185,9 +179,9 @@ class GaussianProcessor:
     ) -> tuple[BytesIO, Image.Image]:
         """Generate 3D model from image(s) (Qwen edit -> BG removal -> Trellis multi-image)."""
 
-        # Trellis "multi image" input: 3 Qwen-edited views (left/right/back), each BG-removed.
+        # Trellis "multi image" input: original + 2 Qwen-edited views (left/right), each BG-removed.
         if apply_qwen_edit:
-            logger.info("Applying Qwen image edits (left/right/back) before background removal ...")
+            logger.info("Applying Qwen image edits (left/right) before background removal ...")
 
             # Use deterministic edit seed even when 3D seed is random.
             edit_seed = self.QWEN_EDIT_SEED if seed < 0 else seed
@@ -216,16 +210,6 @@ class GaussianProcessor:
                 guidance_scale=self.QWEN_EDIT_GUIDANCE_SCALE,
                 num_images_per_prompt=self.QWEN_EDIT_NUM_IMAGES_PER_PROMPT,
             )
-            edited_back = self._edit_image_for_3d_style(
-                image,
-                edit_prompt=self.QWEN_EDIT_PROMPT_BACK,
-                edit_seed=edit_seed,
-                true_cfg_scale=self.QWEN_EDIT_TRUE_CFG_SCALE,
-                negative_prompt=self.QWEN_EDIT_NEGATIVE_PROMPT,
-                num_inference_steps=self.QWEN_EDIT_NUM_INFERENCE_STEPS,
-                guidance_scale=self.QWEN_EDIT_GUIDANCE_SCALE,
-                num_images_per_prompt=self.QWEN_EDIT_NUM_IMAGES_PER_PROMPT,
-            )
 
             def _maybe_remove_bg(img: Image.Image) -> Image.Image:
                 has_alpha = img.mode in ("LA", "RGBA", "PA")
@@ -233,10 +217,9 @@ class GaussianProcessor:
 
             image_without_background_1 = _maybe_remove_bg(edited_left)
             image_without_background_2 = _maybe_remove_bg(edited_right)
-            image_without_background_3 = _maybe_remove_bg(edited_back)
 
-            images_for_3d = [original_no_bg, image_without_background_1, image_without_background_2, image_without_background_3]
-            weights_for_3d = [0.7, 0.1, 0.1, 0.1]
+            images_for_3d = [original_no_bg, image_without_background_1, image_without_background_2]
+            weights_for_3d = [0.8, 0.1, 0.1]
 
             # Similarity gating: drop aux views that drift too far from the original (exact-match priority).
             # Threshold can be tuned via env: TRELLIS_MULTI_SIM_MIN (default 0.25)
