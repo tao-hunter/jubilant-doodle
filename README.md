@@ -72,6 +72,11 @@ Note: Qwen image edit requires a `diffusers` version that includes `QwenImageEdi
 
 - Trellis crops around the alpha mask; if attachments are getting cut off, increase padding:
   - `TRELLIS_ALPHA_PAD=1.5` (default is `1.35`)
+- BiRefNet alpha post-process (helps thin/attached parts):
+  - `ALPHA_REFINE_THRESH=16` (lower keeps more, higher cuts noise)
+  - `ALPHA_REFINE_CLOSE_K=5` (bigger fills holes more)
+  - `ALPHA_REFINE_DILATE_K=3` (bigger preserves thin parts more)
+  - `ALPHA_REFINE_FEATHER=0` (set e.g. `7` for softer edges)
 
 ### Scene mode (object + environment)
 

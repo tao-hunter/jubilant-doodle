@@ -3,6 +3,7 @@ import random
 import os
 from io import BytesIO
 from PIL import Image
+import numpy as np
 
 import ray
 import torch
@@ -134,7 +135,56 @@ class GaussianProcessor:
             return image
 
         # Single BG worker (BiRefNet) -> single output image; no selector.
-        return ray.get(self._bg_removers_workers[0].run.remote(image))
+        out = ray.get(self._bg_removers_workers[0].run.remote(image))
+        return self._refine_alpha(out)
+
+    @staticmethod
+    def _refine_alpha(image_rgba: Image.Image) -> Image.Image:
+        """
+        Post-process alpha mask to preserve thin/attached parts and reduce holes/noise.
+        This helps Trellis' alpha-based cropping and silhouette fidelity.
+        """
+        if image_rgba.mode != "RGBA":
+            image_rgba = image_rgba.convert("RGBA")
+
+        arr = np.array(image_rgba)
+        if arr.ndim != 3 or arr.shape[2] != 4:
+            return image_rgba
+
+        alpha = arr[:, :, 3]
+
+        # Tunables (env) with conservative defaults.
+        thr = int(os.environ.get("ALPHA_REFINE_THRESH", "16"))  # 0..255
+        close_k = int(os.environ.get("ALPHA_REFINE_CLOSE_K", "5"))  # odd >= 1
+        dilate_k = int(os.environ.get("ALPHA_REFINE_DILATE_K", "3"))  # odd >= 1
+        feather = int(os.environ.get("ALPHA_REFINE_FEATHER", "0"))  # gaussian blur kernel (odd), 0 disables
+
+        close_k = max(1, close_k | 1)
+        dilate_k = max(1, dilate_k | 1)
+        if feather > 0:
+            feather = max(1, feather | 1)
+
+        mask = (alpha >= thr).astype(np.uint8) * 255
+
+        try:
+            import cv2  # type: ignore
+
+            close_kernel = np.ones((close_k, close_k), np.uint8)
+            dilate_kernel = np.ones((dilate_k, dilate_k), np.uint8)
+
+            # Close small holes/gaps, then dilate slightly to keep thin parts.
+            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, close_kernel)
+            mask = cv2.dilate(mask, dilate_kernel, iterations=1)
+
+            # Optional feather for smoother edges.
+            if feather > 0:
+                mask = cv2.GaussianBlur(mask, (feather, feather), 0)
+        except Exception:
+            # Fallback: keep thresholded mask only.
+            pass
+
+        arr[:, :, 3] = mask.astype(np.uint8)
+        return Image.fromarray(arr, mode="RGBA")
 
     def _edit_image_for_3d_style(
         self,
